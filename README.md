@@ -1,14 +1,18 @@
-# [pgvec-studio
+# pgvec-studio
 
-[License: MIT](LICENSE)
-[Next.js](https://nextjs.org)
-[TypeScript](https://www.typescriptlang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org)
 
 A visual explorer for pgvector embeddings. Because staring at 1536 floating point numbers in a terminal and pretending you understand your data is not a great strategy.
 
 You paste a connection string, pick a table, click Visualize, and your embeddings show up as an interactive 2D scatter plot — projected down from whatever cursed dimensionality your model decided to use. Click a point, inspect its metadata, find its neighbors, export what you need. That's it.
 
 No cloud. No account. No "we've updated our privacy policy." Everything runs on your machine through a local Next.js server. Your connection string lives in `sessionStorage` and dies when you close the tab, exactly like it should.
+
+![Connection page](.github/assets/connection.png)
+
+![Studio with embeddings visualized](.github/assets/studio.png)
 
 ## What you get
 
