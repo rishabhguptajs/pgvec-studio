@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# [pgvec-studio
 
-## Getting Started
+[License: MIT](LICENSE)
+[Next.js](https://nextjs.org)
+[TypeScript](https://www.typescriptlang.org)
 
-First, run the development server:
+A visual explorer for pgvector embeddings. Because staring at 1536 floating point numbers in a terminal and pretending you understand your data is not a great strategy.
+
+You paste a connection string, pick a table, click Visualize, and your embeddings show up as an interactive 2D scatter plot — projected down from whatever cursed dimensionality your model decided to use. Click a point, inspect its metadata, find its neighbors, export what you need. That's it.
+
+No cloud. No account. No "we've updated our privacy policy." Everything runs on your machine through a local Next.js server. Your connection string lives in `sessionStorage` and dies when you close the tab, exactly like it should.
+
+## What you get
+
+**2D visualization** — UMAP takes your high-dimensional vectors and squishes them into 2D in a way that actually preserves neighborhood structure. Semantically similar embeddings cluster together. You can finally see what your model is doing.
+
+**Vector similarity search** — paste a raw vector and find its nearest neighbors in your table. Useful for debugging retrieval, spot-checking embedding quality, or confirming that your chunks aren't all identical.
+
+**Metadata filtering** — filter rows by any non-vector column before running the visualization. If you have 2 million rows and only care about `source = 'docs'`, narrow it down first. The UI caps at 2,000 points and will tell you if you're hitting the limit.
+
+**Row inspector** — click any point on the scatter plot to see all its metadata. There's a button to load that row's vector directly into the search panel, which makes it really easy to explore the neighborhood around any point.
+
+**Cosine similarity calculator** — compare any two rows by their IDs and get the cosine similarity back. Good for sanity checking ("why are these two docs showing up in the same results?").
+
+**Export** — download the current filtered view as CSV or JSON. Useful when you want to take the data somewhere else without running another SQL query.
+
+## Quick start
 
 ```bash
+git clone https://github.com/rishabhguptajs/pgvec-studio
+cd pgvec-studio
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) and paste your connection string.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Connection strings that work
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+postgresql://user:password@localhost:5432/mydb
+postgresql://user:password@host.neon.tech/mydb?sslmode=require
+postgresql://user:password@project.supabase.co:5432/postgres
+```
 
-## Learn More
+SSL is auto-detected for Neon and Supabase. For anything else that needs SSL, add `?sslmode=require` to your connection string and it'll figure it out.
 
-To learn more about Next.js, take a look at the following resources:
+## Requirements
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+PostgreSQL with [pgvector](https://github.com/pgvector/pgvector) installed and at least one table with a `vector` column. Node.js 18 or later on your machine.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The app reads from your database. It doesn't write anything, create anything, or modify anything. A read-only Postgres user is fine and probably a good idea.
 
-## Deploy on Vercel
+## Why does this exist
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Most tools for working with embeddings either require you to use their specific vector database, live behind a SaaS login, or ask you to upload your data to their servers. This one doesn't do any of that. If you already have pgvector and want to see what's actually in your tables without leaving your terminal workflow, this is for you.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Tech stack
+
+Built with Next.js 16, TypeScript, and Tailwind CSS. The server-side routes talk to Postgres directly via `node-postgres`. Dimensionality reduction is handled by `umap-js` (no Python, no separate process). Plotting is Plotly.js.
+
+## Contributing
+
+Bug reports, feature requests, and pull requests are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up locally and what to keep in mind before opening a PR.
+
+## License
+
+[MIT](LICENSE)
