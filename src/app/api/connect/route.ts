@@ -90,6 +90,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, tables })
   } catch (err) {
+    console.error('[api/connect] failed:', err)
     return NextResponse.json(
       { error: humanizePgError(err) },
       { status: 500 },
