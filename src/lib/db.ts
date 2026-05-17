@@ -1,3 +1,4 @@
+import * as net from 'net'
 import { Client, Pool } from 'pg'
 
 export function createPool(connectionString: string): Pool {
@@ -100,19 +101,18 @@ async function resolveServerlessFriendlyConnectionString(
   const cached = supabaseRegionCache.get(parsed.projectRef)
   if (cached) return buildPoolerUrl(parsed, cached)
 
-  const attempts = SUPABASE_AWS_REGIONS.map(async (region) => {
-    const candidate = buildPoolerUrl(parsed, region)
-    const client = new Client({
-      connectionString: candidate,
-      ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 4000,
+  const attempts = SUPABASE_AWS_REGIONS.map((region) => {
+    const host = `aws-0-${region}.pooler.supabase.com`
+    return new Promise<{ region: string; candidate: string }>((resolve, reject) => {
+      const socket = net.connect({ host, port: 5432 })
+      socket.setTimeout(3000)
+      socket.once('connect', () => {
+        socket.destroy()
+        resolve({ region, candidate: buildPoolerUrl(parsed!, region) })
+      })
+      socket.once('timeout', () => { socket.destroy(); reject(new Error('timeout')) })
+      socket.once('error', reject)
     })
-    try {
-      await client.connect()
-      return { region, candidate }
-    } finally {
-      await client.end().catch(() => {})
-    }
   })
 
   try {
@@ -128,6 +128,9 @@ export function humanizePgError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err)
   const code = (err as { code?: string })?.code
 
+  if (code === 'ENETUNREACH' || /ENETUNREACH/.test(message)) {
+    return 'Network unreachable — the database host resolved to an IPv6 address but your network has no IPv6 route. For Supabase, use the Session Pooler URL from the Supabase dashboard (Settings → Database → Connection Pooling) instead of the direct connection string.'
+  }
   if (code === 'ECONNREFUSED' || /ECONNREFUSED/.test(message)) {
     return 'Could not reach the database. Is it running and reachable from this machine?'
   }
