@@ -1,7 +1,21 @@
-import * as net from 'net'
-import { Client, Pool } from 'pg'
+import * as dns from 'dns'
+import { Pool } from 'pg'
+
+let preferredIpv4Dns = false
+
+function preferIpv4Dns(): void {
+  if (preferredIpv4Dns) return
+  preferredIpv4Dns = true
+  try {
+    dns.setDefaultResultOrder('ipv4first')
+  } catch {
+    // Older Node versions may not support this option. The connection can
+    // still proceed with Node's default DNS ordering.
+  }
+}
 
 export function createPool(connectionString: string): Pool {
+  preferIpv4Dns()
   const needsSsl =
     connectionString.includes('sslmode=require') ||
     connectionString.includes('neon.tech') ||
@@ -30,98 +44,52 @@ export async function withPool<T>(
   }
 }
 
-// --- Supabase direct → Supavisor pooler rewrite ----------------------------
-// Supabase's direct host `db.<ref>.supabase.co` is IPv6-only on the free tier.
-// Vercel functions (and many other serverless platforms) have no IPv6 egress,
-// so connection fails with ENOTFOUND. The Supavisor pooler at
-// `aws-0-<region>.pooler.supabase.com` is dual-stack, so we transparently
-// rewrite to it. The region isn't in the original URL, so we probe known
-// regions in parallel on first use and cache the winner per project ref.
+// --- Serverless-friendly connection string normalization -------------------
+// Keep provider URLs intact whenever possible. Node is asked to prefer IPv4
+// for dual-stack hosts, which fixes providers that publish both A and AAAA
+// records. Supabase direct database hosts are the exception: their direct
+// URL can be IPv6-only, so IPv4-only platforms such as Render need the
+// built-in Supavisor transaction pooler on port 6543. That form is derived
+// from the direct URL and does not require hard-coded cloud regions.
 
-const SUPABASE_AWS_REGIONS = [
-  'us-east-1',
-  'us-east-2',
-  'us-west-1',
-  'ca-central-1',
-  'sa-east-1',
-  'eu-west-1',
-  'eu-west-2',
-  'eu-west-3',
-  'eu-central-1',
-  'eu-central-2',
-  'eu-north-1',
-  'ap-south-1',
-  'ap-southeast-1',
-  'ap-southeast-2',
-  'ap-northeast-1',
-  'ap-northeast-2',
-]
-
-const supabaseRegionCache = new Map<string, string>()
-
-interface SupabaseDirectParts {
-  user: string
-  password: string
-  projectRef: string
-  database: string
-  search: string
-}
-
-function parseSupabaseDirect(connStr: string): SupabaseDirectParts | null {
+function parseConnectionUrl(connStr: string): URL | null {
   let url: URL
   try {
     url = new URL(connStr)
   } catch {
     return null
   }
-  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') return null
-  const m = url.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/i)
-  if (!m) return null
-  return {
-    user: decodeURIComponent(url.username) || 'postgres',
-    password: decodeURIComponent(url.password),
-    projectRef: m[1],
-    database: url.pathname.replace(/^\//, '') || 'postgres',
-    search: url.search,
+  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
+    return null
   }
+  return url
 }
 
-function buildPoolerUrl(p: SupabaseDirectParts, region: string): string {
-  const user = encodeURIComponent(`${p.user}.${p.projectRef}`)
-  const password = encodeURIComponent(p.password)
-  return `postgresql://${user}:${password}@aws-0-${region}.pooler.supabase.com:5432/${p.database}${p.search}`
+function isSupabaseDirectUrl(url: URL): boolean {
+  return (
+    /^db\.[a-z0-9]+\.supabase\.co$/i.test(url.hostname) &&
+    (url.port === '' || url.port === '5432')
+  )
+}
+
+function buildSupabaseTransactionPoolerUrl(url: URL): string {
+  const poolerUrl = new URL(url.toString())
+  poolerUrl.protocol = 'postgresql:'
+  poolerUrl.port = '6543'
+  return poolerUrl.toString()
 }
 
 async function resolveServerlessFriendlyConnectionString(
   connStr: string,
 ): Promise<string> {
-  const parsed = parseSupabaseDirect(connStr)
+  const parsed = parseConnectionUrl(connStr)
   if (!parsed) return connStr
 
-  const cached = supabaseRegionCache.get(parsed.projectRef)
-  if (cached) return buildPoolerUrl(parsed, cached)
-
-  const attempts = SUPABASE_AWS_REGIONS.map((region) => {
-    const host = `aws-0-${region}.pooler.supabase.com`
-    return new Promise<{ region: string; candidate: string }>((resolve, reject) => {
-      const socket = net.connect({ host, port: 5432 })
-      socket.setTimeout(3000)
-      socket.once('connect', () => {
-        socket.destroy()
-        resolve({ region, candidate: buildPoolerUrl(parsed!, region) })
-      })
-      socket.once('timeout', () => { socket.destroy(); reject(new Error('timeout')) })
-      socket.once('error', reject)
-    })
-  })
-
-  try {
-    const winner = await Promise.any(attempts)
-    supabaseRegionCache.set(parsed.projectRef, winner.region)
-    return winner.candidate
-  } catch {
-    return connStr
+  if (isSupabaseDirectUrl(parsed)) {
+    return buildSupabaseTransactionPoolerUrl(parsed)
   }
+
+  return connStr
 }
 
 export function humanizePgError(err: unknown): string {
@@ -129,7 +97,7 @@ export function humanizePgError(err: unknown): string {
   const code = (err as { code?: string })?.code
 
   if (code === 'ENETUNREACH' || /ENETUNREACH/.test(message)) {
-    return 'Network unreachable — the database host resolved to an IPv6 address but your network has no IPv6 route. For Supabase, use the Session Pooler URL from the Supabase dashboard (Settings → Database → Connection Pooling) instead of the direct connection string.'
+    return 'Network unreachable — the database host resolved to an IPv6 address but your network has no IPv6 route. If this is a Supabase direct URL, the app will try the IPv4-compatible pooler automatically; otherwise use an IPv4-compatible database endpoint from your provider.'
   }
   if (code === 'ECONNREFUSED' || /ECONNREFUSED/.test(message)) {
     return 'Could not reach the database. Is it running and reachable from this machine?'
